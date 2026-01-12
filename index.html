@@ -12,23 +12,20 @@
     button { cursor:pointer; background:#111827; color:#fff; }
     button:disabled { opacity:.5; cursor:not-allowed; }
     .row { display:flex; gap:10px; align-items:center; margin-bottom:12px; }
-    .task {
-      display:flex; align-items:center; gap:10px;
-      padding:12px; background:#fff; border-radius:10px;
-      border:1px solid #eee; margin-bottom:8px;
-    }
+    .task { display:flex; align-items:center; gap:10px; padding:12px; background:#fff; border-radius:10px; border:1px solid #eee; margin-bottom:8px; }
     .task.completed span { text-decoration:line-through; opacity:.6; }
     .alert { padding:10px; border-radius:8px; margin-bottom:10px; }
     .alert.error { background:#f8d7da; }
-    .alert.warn { background:#fff3cd; }
-    .small { font-size:12px; opacity:.75; margin-top:6px; }
-    code { background:#eef2ff; padding:2px 6px; border-radius:6px; }
+    .alert.ok { background:#d1e7dd; }
+    .small { font-size:12px; opacity:.75; margin-top:6px; line-height:1.4; }
     .muted { font-size:12px; opacity:.7; }
+    code { background:#eef2ff; padding:2px 6px; border-radius:6px; }
   </style>
 </head>
 <body>
 <div class="container">
   <h1>하루 일정</h1>
+
   <div id="status"></div>
 
   <div class="row">
@@ -44,7 +41,7 @@
   <div id="tasks"></div>
 
   <div class="muted" style="margin-top:14px;">
-    ※ GitHub Pages에서 인증 오류가 나면 Firebase 콘솔 Authorized domains에
+    ※ GitHub Pages 인증 오류 시 Firebase 콘솔 Authorized domains에
     <code>dhkim3s-creator.github.io</code> 를 추가하세요.
   </div>
 </div>
@@ -53,6 +50,7 @@
   import { initializeApp } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-app.js";
   import {
     getAuth,
+    signInAnonymously,
     signInWithEmailAndPassword,
     createUserWithEmailAndPassword,
     onAuthStateChanged
@@ -98,58 +96,87 @@
   let currentUser = null;
   let unsubscribeTasks = null;
 
-  function showError(title, e) {
+  function showStatus(type, title, e=null) {
+    if (type === "ok") {
+      statusEl.innerHTML = `<div class="alert ok">${title}</div>`;
+      return;
+    }
     const code = e?.code || "-";
     const msg = e?.message || "";
-    let hint = `
-      <div class="small">
-        ✅ Firebase Console → Authentication → Sign-in method: <b>Email/Password</b> Enable<br/>
-        ✅ Firebase Console → Authentication → Settings → Authorized domains에
-        <code>${location.hostname}</code> 추가
-      </div>
-    `;
     statusEl.innerHTML = `
       <div class="alert error">
         ${title}
         <div class="small">code: <code>${code}</code></div>
         <div class="small">${msg}</div>
-        ${hint}
+        <div class="small">
+          ✅ Firebase Console → Authentication → Sign-in method에서 <b>Anonymous</b> 또는 <b>Email/Password</b>를 Enable<br/>
+          ✅ Firebase Console → Authentication → Settings → Authorized domains에 <code>${location.hostname}</code> 추가
+        </div>
       </div>
     `;
   }
 
+  // 브라우저별 crypto.randomUUID 미지원 대비
+  function makeId() {
+    if (crypto?.randomUUID) return crypto.randomUUID();
+    return String(Date.now()) + "_" + Math.random().toString(16).slice(2);
+  }
+
+  // 자동 계정(Email/Password fallback용)
   function getAutoAccount() {
     let email = localStorage.getItem("autoEmail");
     let password = localStorage.getItem("autoPassword");
     if (!email || !password) {
-      const uid = (crypto?.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random());
+      const uid = makeId();
       email = `user_${uid}@schedule.local`;
-      password = String(uid);
+      password = uid;
       localStorage.setItem("autoEmail", email);
       localStorage.setItem("autoPassword", password);
     }
     return { email, password };
   }
 
-  async function loginAuto() {
+  // ✅ 1차: Anonymous 로그인 시도 → 실패하면 Email/Password 자동 가입/로그인
+  async function ensureSignedIn() {
+    try {
+      await signInAnonymously(auth);
+      return;
+    } catch (e1) {
+      console.warn("Anonymous failed, fallback to Email/Password", e1);
+    }
+
     const { email, password } = getAutoAccount();
     try {
       await signInWithEmailAndPassword(auth, email, password);
-    } catch (e) {
-      if (e.code === "auth/user-not-found") {
+    } catch (e2) {
+      if (e2.code === "auth/user-not-found") {
         try {
           await createUserWithEmailAndPassword(auth, email, password);
-        } catch (e2) {
-          showError("자동 계정 생성 실패", e2);
+        } catch (e3) {
+          // "invalid-login-credentials" 등 포함해서 여기로 떨어질 수 있음
+          showStatus("error", "로그인/가입 실패", e3);
+          throw e3;
+        }
+      } else if (e2.code === "auth/invalid-login-credentials") {
+        // 저장된 비번이 꼬인 경우: 재생성 후 가입 시도
+        localStorage.removeItem("autoEmail");
+        localStorage.removeItem("autoPassword");
+        const a = getAutoAccount();
+        try {
+          await createUserWithEmailAndPassword(auth, a.email, a.password);
+        } catch (e4) {
+          showStatus("error", "로그인 정보가 꼬여 재생성했지만 실패", e4);
+          throw e4;
         }
       } else {
-        showError("로그인 실패", e);
+        showStatus("error", "로그인 실패", e2);
+        throw e2;
       }
     }
   }
 
   function escapeHtml(s) {
-    return s.replace(/[&<>"']/g, (c) => ({
+    return (s || "").replace(/[&<>"']/g, (c) => ({
       "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"
     }[c]));
   }
@@ -173,20 +200,20 @@
         div.className = "task" + (t.completed ? " completed" : "");
         div.innerHTML = `
           <input type="checkbox" ${t.completed ? "checked" : ""}/>
-          <span style="flex:1">${escapeHtml(t.text || "")}</span>
+          <span style="flex:1">${escapeHtml(t.text)}</span>
           <button>삭제</button>
         `;
 
         div.querySelector("input").onchange = async () => {
           try {
             await updateDoc(doc(db, "tasks", docSnap.id), { completed: !t.completed });
-          } catch (e) { showError("완료 변경 실패", e); }
+          } catch (e) { showStatus("error", "완료 변경 실패", e); }
         };
 
         div.querySelector("button").onclick = async () => {
           try {
             await deleteDoc(doc(db, "tasks", docSnap.id));
-          } catch (e) { showError("삭제 실패", e); }
+          } catch (e) { showStatus("error", "삭제 실패", e); }
         };
 
         tasksEl.appendChild(div);
@@ -195,7 +222,7 @@
       if (snapshot.size === 0) {
         tasksEl.innerHTML = `<div class="small">아직 할 일이 없습니다.</div>`;
       }
-    }, (e) => showError("Firestore 구독 실패", e));
+    }, (e) => showStatus("error", "Firestore 구독 실패", e));
   }
 
   addBtn.onclick = async () => {
@@ -211,21 +238,23 @@
         createdAt: serverTimestamp()
       });
     } catch (e) {
-      showError("일정 추가 실패", e);
+      showStatus("error", "일정 추가 실패", e);
       taskInput.value = text;
     }
   };
 
   datePicker.onchange = loadTasks;
 
+  // 시작
   onAuthStateChanged(auth, (user) => {
     if (user) {
       currentUser = user;
-      userInfo.textContent = `계정: ${user.email}`;
+      userInfo.textContent = `계정: ${user.uid.substring(0, 8)}…`;
       statusEl.innerHTML = "";
       loadTasks();
     } else {
-      loginAuto();
+      // 최초 진입 시 로그인 수행
+      ensureSignedIn().catch(() => {});
     }
   });
 </script>
