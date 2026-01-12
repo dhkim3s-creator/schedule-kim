@@ -1,306 +1,148 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ko">
 <head>
-  <meta charset="UTF-8" />
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>하루 일정</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <style>
-    body { margin:0; font-family:system-ui; background:#f9fafb; }
-    .container { max-width:720px; margin:0 auto; padding:20px; }
-    h1 { margin:0 0 12px; }
-    input, button { padding:10px; border-radius:8px; border:1px solid #ddd; font-size:14px; }
-    button { cursor:pointer; background:#111827; color:#fff; }
-    button:disabled { opacity:.5; cursor:not-allowed; }
-    .row { display:flex; gap:10px; align-items:center; margin-bottom:12px; }
-    .task { display:flex; align-items:center; gap:10px; padding:12px; background:#fff; border-radius:10px; border:1px solid #eee; margin-bottom:8px; }
-    .task.completed span { text-decoration:line-through; opacity:.6; }
-    .alert { padding:10px; border-radius:8px; margin-bottom:10px; }
-    .alert.error { background:#f8d7da; }
-    .alert.warn { background:#fff3cd; }
-    .alert.ok { background:#d1e7dd; }
-    .small { font-size:12px; opacity:.8; margin-top:6px; line-height:1.45; }
-    .muted { font-size:12px; opacity:.7; }
-    code { background:#eef2ff; padding:2px 6px; border-radius:6px; }
+    :root { --bg:#f6f7fb; --card:#fff; --text:#111827; --muted:#6b7280; --primary:#4f46e5; --danger:#ef4444; --border:#e5e7eb; }
+    *{box-sizing:border-box}
+    body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,"Noto Sans KR",sans-serif;background:var(--bg);color:var(--text)}
+    .wrap{max-width:880px;margin:24px auto;padding:0 16px}
+    h1{margin:0 0 12px;font-size:34px;letter-spacing:-0.02em}
+    .card{background:var(--card);border:1px solid var(--border);border-radius:16px;box-shadow:0 10px 30px rgba(0,0,0,.05)}
+    .banner{padding:14px 16px;border-bottom:1px solid var(--border);border-radius:16px 16px 0 0;display:none}
+    .banner.warn{display:block;background:#fff7ed;border-bottom-color:#fed7aa}
+    .banner .title{font-weight:800;color:#9a3412}
+    .banner .desc{font-size:13px;color:#9a3412;margin-top:6px;line-height:1.4}
+    .top{padding:16px;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+    .top .row{display:flex;gap:8px;align-items:center}
+    .pill{font-size:12px;color:var(--muted)}
+    input[type="date"], input[type="text"]{
+      border:1px solid var(--border);border-radius:10px;padding:10px 12px;font-size:14px;background:#fff;outline:none
+    }
+    input[type="text"]{flex:1;min-width:220px}
+    button{
+      border:0;border-radius:12px;padding:10px 14px;font-weight:700;color:#fff;background:var(--primary);cursor:pointer
+    }
+    button:disabled{opacity:.45;cursor:not-allowed}
+    .btn-secondary{background:#111827}
+    .btn-danger{background:var(--danger)}
+    .main{padding:0 16px 16px}
+    .add{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:8px}
+    select{border:1px solid var(--border);border-radius:10px;padding:10px 10px;background:#fff}
+    .list{margin-top:14px;display:flex;flex-direction:column;gap:10px}
+    .item{display:flex;gap:10px;align-items:center;padding:12px 12px;border:1px solid var(--border);border-radius:14px;background:#fff}
+    .item .txt{flex:1}
+    .item .time{font-size:12px;color:var(--muted);margin-top:4px}
+    .empty{padding:24px;text-align:center;color:var(--muted)}
+    .footer-note{margin-top:10px;font-size:12px;color:var(--muted)}
+    .small{font-size:12px;color:var(--muted)}
+    .right{margin-left:auto}
+    .checkbox{width:18px;height:18px}
+    .strike{text-decoration:line-through;color:#9ca3af}
   </style>
 </head>
+
 <body>
-<div class="container">
-  <h1>하루 일정</h1>
+  <div class="wrap">
+    <h1>하루 일정</h1>
 
-  <div id="status"></div>
-
-  <div class="row">
-    <input type="date" id="datePicker" />
-    <div id="userInfo" class="muted"></div>
-  </div>
-
-  <div class="row" style="gap:8px;">
-    <input id="taskInput" placeholder="할 일 입력" style="flex:1;" />
-    <button id="addBtn">추가</button>
-  </div>
-
-  <div id="tasks"></div>
-</div>
-
-<script type="module">
-  import { initializeApp } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-app.js";
-  import {
-    getAuth,
-    signInAnonymously,
-    onAuthStateChanged
-  } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-auth.js";
-  import {
-    getFirestore,
-    collection,
-    addDoc,
-    deleteDoc,
-    doc,
-    updateDoc,
-    onSnapshot,
-    query,
-    where,
-    orderBy,
-    serverTimestamp
-  } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore.js";
-
-  // Firebase 설정 (교수님 제공 키)
-  const firebaseConfig = {
-    apiKey: "AIzaSyBSwGAhynYlK68A18WEqWSG1XZaY_q3VHw",
-    authDomain: "schedule-kim.firebaseapp.com",
-    databaseURL: "https://schedule-kim-default-rtdb.asia-southeast1.firebasedatabase.app",
-    projectId: "schedule-kim",
-    storageBucket: "schedule-kim.firebasestorage.app",
-    messagingSenderId: "623069272138",
-    appId: "1:623069272138:web:5caa87bf0723083149aeb3"
-  };
-
-  const app = initializeApp(firebaseConfig);
-  const auth = getAuth(app);
-  const db = getFirestore(app);
-
-  const statusEl = document.getElementById("status");
-  const datePicker = document.getElementById("datePicker");
-  const taskInput = document.getElementById("taskInput");
-  const addBtn = document.getElementById("addBtn");
-  const tasksEl = document.getElementById("tasks");
-  const userInfo = document.getElementById("userInfo");
-
-  datePicker.value = new Date().toISOString().slice(0, 10);
-
-  let currentUser = null;
-  let unsubscribeTasks = null;
-  let onlineOK = false;
-
-  function escapeHtml(s) {
-    return (s || "").replace(/[&<>"']/g, (c) => ({
-      "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"
-    }[c]));
-  }
-
-  function show(type, title, detailHtml="") {
-    const cls = type === "error" ? "error" : type === "warn" ? "warn" : "ok";
-    statusEl.innerHTML = `
-      <div class="alert ${cls}">
-        <b>${title}</b>
-        ${detailHtml ? `<div class="small">${detailHtml}</div>` : ""}
+    <div class="card">
+      <div id="banner" class="banner warn">
+        <div class="title" id="bannerTitle">온라인 동기화가 막혀 있습니다 (로컬로 표시 중)</div>
+        <div class="desc" id="bannerDesc"></div>
       </div>
-    `;
-  }
 
-  function clearStatus() { statusEl.innerHTML = ""; }
+      <div class="top">
+        <div class="row">
+          <input id="dateInput" type="date" />
+          <div class="pill" id="accountPill">계정: -</div>
+        </div>
+        <div class="right row">
+          <button id="retryBtn" class="btn-secondary" style="display:none;">다시 연결</button>
+        </div>
+      </div>
 
-  // 로컬 백업 키(유저별)
-  function localKey(uid, date) {
-    return `tasks_local_${uid}_${date}`;
-  }
+      <div class="main">
+        <div class="add">
+          <select id="ampmSel">
+            <option value="오전">오전</option>
+            <option value="오후">오후</option>
+          </select>
+          <select id="hourSel"></select>
+          <select id="minSel"></select>
 
-  function loadLocal(uid, date) {
-    try {
-      const raw = localStorage.getItem(localKey(uid, date));
-      return raw ? JSON.parse(raw) : [];
-    } catch {
-      return [];
-    }
-  }
+          <input id="taskInput" type="text" placeholder="할 일 입력" />
+          <button id="addBtn" disabled>추가</button>
+        </div>
 
-  function saveLocal(uid, date, tasks) {
-    localStorage.setItem(localKey(uid, date), JSON.stringify(tasks));
-  }
+        <div class="list" id="list"></div>
+        <div class="empty" id="empty" style="display:none;">아직 할 일이 없습니다.</div>
 
-  function renderTasks(list) {
-    tasksEl.innerHTML = "";
-    if (!list.length) {
-      tasksEl.innerHTML = `<div class="small">아직 할 일이 없습니다.</div>`;
-      return;
-    }
-    for (const t of list) {
-      const div = document.createElement("div");
-      div.className = "task" + (t.completed ? " completed" : "");
-      div.innerHTML = `
-        <input type="checkbox" ${t.completed ? "checked" : ""}/>
-        <span style="flex:1">${escapeHtml(t.text)}</span>
-        <button>삭제</button>
-      `;
-      div.querySelector("input").onchange = () => toggleTask(t);
-      div.querySelector("button").onclick = () => deleteTask(t);
-      tasksEl.appendChild(div);
-    }
-  }
+        <div class="footer-note">
+          ※ GitHub Pages 인증 오류 시 Firebase 콘솔 Authentication → Settings → Authorized domains에
+          <b>dhkim3s-creator.github.io</b> 를 추가하세요.
+        </div>
+      </div>
+    </div>
 
-  // ✅ Firestore 구독 + 실패 시 로컬 모드로 안내
-  function subscribeTasks() {
-    if (!currentUser) return;
-    if (unsubscribeTasks) unsubscribeTasks();
+    <div class="small" style="margin-top:10px;">
+      저장 위치: (온라인) Firestore /artifacts/schedule-kim-app/users/&lt;uid&gt;/tasks  또는 (오프라인) 브라우저 LocalStorage
+    </div>
+  </div>
 
-    const date = datePicker.value;
+  <!-- Firebase (modular) via CDN -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
+    import {
+      getAuth,
+      signInAnonymously,
+      onAuthStateChanged
+    } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 
-    const q = query(
-      collection(db, "tasks"),
-      where("uid", "==", currentUser.uid),
-      where("date", "==", date),
-      orderBy("createdAt", "desc")
-    );
+    import {
+      getFirestore,
+      collection,
+      addDoc,
+      deleteDoc,
+      doc,
+      updateDoc,
+      onSnapshot,
+      serverTimestamp
+    } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
-    unsubscribeTasks = onSnapshot(q, (snap) => {
-      onlineOK = true;
-      clearStatus();
+    // --- Firebase config (교수님 값) ---
+    const firebaseConfig = {
+      apiKey: "AIzaSyBSwGAhynYlK68A18WEqWSG1XZaY_q3VHw",
+      authDomain: "schedule-kim.firebaseapp.com",
+      databaseURL: "https://schedule-kim-default-rtdb.asia-southeast1.firebasedatabase.app",
+      projectId: "schedule-kim",
+      storageBucket: "schedule-kim.firebasestorage.app",
+      messagingSenderId: "623069272138",
+      appId: "1:623069272138:web:5caa87bf0723083149aeb3"
+    };
 
-      const list = [];
-      snap.forEach(ds => {
-        const d = ds.data();
-        list.push({
-          id: ds.id,
-          text: d.text,
-          date: d.date,
-          completed: !!d.completed
-        });
-      });
+    // --- App state ---
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
 
-      // 온라인 데이터를 로컬에도 백업
-      saveLocal(currentUser.uid, date, list);
+    // GitHub Pages에서도 고정되는 appId (문서 경로에 들어감)
+    const appId = "schedule-kim-app";
 
-      renderTasks(list);
-    }, (e) => {
-      onlineOK = false;
+    let user = null;
+    let unsubscribeSnap = null;
+    let isOffline = false;
 
-      // 온라인 조회 실패 → 로컬 백업 표시
-      const local = loadLocal(currentUser.uid, date);
-      renderTasks(local);
+    // --- DOM ---
+    const banner = document.getElementById("banner");
+    const bannerTitle = document.getElementById("bannerTitle");
+    const bannerDesc = document.getElementById("bannerDesc");
+    const retryBtn = document.getElementById("retryBtn");
 
-      const host = location.hostname;
-      let hint = `Firestore 읽기 실패로 로컬 백업을 표시합니다.<br/>`;
-      hint += `1) Firestore Rules가 본인 uid 읽기/쓰기를 허용하는지 확인<br/>`;
-      hint += `2) Firebase Auth → Authorized domains에 <code>${host}</code> 추가<br/>`;
+    const dateInput = document.getElementById("dateInput");
+    const accountPill = document.getElementById("accountPill");
 
-      // 인덱스 필요 시 Firestore가 보통 메시지에 링크를 줌 (여기서는 안내만)
-      hint += `3) 콘솔(F12)에 "index" 관련 에러가 있으면 Firestore 인덱스를 생성`;
-
-      show("warn", "온라인 동기화가 막혀 있습니다 (로컬로 표시 중)", hint);
-      console.warn("onSnapshot error:", e);
-    });
-  }
-
-  async function ensureSignedIn() {
-    try {
-      await signInAnonymously(auth);
-    } catch (e) {
-      const host = location.hostname;
-      const hint =
-        `Firebase Console → Authentication → Sign-in method에서 <b>Anonymous</b>를 Enable 하세요.<br/>` +
-        `그리고 Authorized domains에 <code>${host}</code> 를 추가하세요.`;
-      show("error", "로그인 실패", hint);
-      throw e;
-    }
-  }
-
-  async function addTask() {
-    const text = taskInput.value.trim();
-    if (!text || !currentUser) return;
-
-    const date = datePicker.value;
-    taskInput.value = "";
-
-    // 먼저 로컬에 즉시 반영(UX)
-    const local = loadLocal(currentUser.uid, date);
-    const temp = { id: "local_" + Date.now(), text, date, completed: false };
-    saveLocal(currentUser.uid, date, [temp, ...local]);
-    renderTasks([temp, ...local]);
-
-    // 온라인 저장 시도
-    try {
-      await addDoc(collection(db, "tasks"), {
-        uid: currentUser.uid,
-        date,
-        text,
-        completed: false,
-        createdAt: serverTimestamp()
-      });
-      // 저장 성공하면 onSnapshot이 다시 내려오며 화면 정리됨
-    } catch (e) {
-      onlineOK = false;
-      const host = location.hostname;
-      const hint =
-        `Firestore 저장이 차단되어 로컬에만 저장되었습니다.<br/>` +
-        `✅ Firestore Rules를 설정해야 새로고침 후에도 유지됩니다.<br/>` +
-        `✅ Authorized domains에 <code>${host}</code> 추가`;
-      show("warn", "온라인 저장 실패 (현재 로컬 저장만 됨)", hint);
-      console.warn("addDoc error:", e);
-    }
-  }
-
-  async function toggleTask(t) {
-    const date = datePicker.value;
-    const local = loadLocal(currentUser.uid, date);
-    const updated = local.map(x => x.id === t.id ? { ...x, completed: !x.completed } : x);
-    saveLocal(currentUser.uid, date, updated);
-    renderTasks(updated);
-
-    // 온라인이면 같이 반영
-    if (onlineOK && t.id && !String(t.id).startsWith("local_")) {
-      try {
-        await updateDoc(doc(db, "tasks", t.id), { completed: !t.completed });
-      } catch (e) {
-        console.warn("updateDoc error:", e);
-      }
-    }
-  }
-
-  async function deleteTask(t) {
-    const date = datePicker.value;
-    const local = loadLocal(currentUser.uid, date).filter(x => x.id !== t.id);
-    saveLocal(currentUser.uid, date, local);
-    renderTasks(local);
-
-    if (onlineOK && t.id && !String(t.id).startsWith("local_")) {
-      try {
-        await deleteDoc(doc(db, "tasks", t.id));
-      } catch (e) {
-        console.warn("deleteDoc error:", e);
-      }
-    }
-  }
-
-  addBtn.onclick = addTask;
-  datePicker.onchange = () => {
-    // 날짜 바꾸면 로컬 먼저 표시 후 구독 갱신
-    if (!currentUser) return;
-    const local = loadLocal(currentUser.uid, datePicker.value);
-    renderTasks(local);
-    subscribeTasks();
-  };
-
-  onAuthStateChanged(auth, (user) => {
-    if (user) {
-      currentUser = user;
-      userInfo.textContent = `계정: ${user.uid.substring(0, 8)}…`;
-      // 로컬 먼저 표시
-      renderTasks(loadLocal(currentUser.uid, datePicker.value));
-      // 그리고 온라인 구독
-      subscribeTasks();
-    } else {
-      ensureSignedIn().catch(()=>{});
-    }
-  });
-</script>
-</body>
-</html>
+    const ampmSel = document.getElementById("ampmSel");
+    const hourSel = document.getElementById("hourSel");
