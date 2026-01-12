@@ -14,9 +14,9 @@
     .banner{padding:14px 16px;border-bottom:1px solid var(--border);border-radius:16px 16px 0 0;display:none}
     .banner.warn{display:block;background:#fff7ed;border-bottom-color:#fed7aa}
     .banner .title{font-weight:800;color:#9a3412}
-    .banner .desc{font-size:13px;color:#9a3412;margin-top:6px;line-height:1.4}
+    .banner .desc{font-size:13px;color:#9a3412;margin-top:6px;line-height:1.5;white-space:pre-line}
     .top{padding:16px;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
-    .top .row{display:flex;gap:8px;align-items:center}
+    .top .row{display:flex;gap:10px;align-items:center}
     .pill{font-size:12px;color:var(--muted)}
     input[type="date"], input[type="text"]{
       border:1px solid var(--border);border-radius:10px;padding:10px 12px;font-size:14px;background:#fff;outline:none
@@ -32,12 +32,12 @@
     .add{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:8px}
     select{border:1px solid var(--border);border-radius:10px;padding:10px 10px;background:#fff}
     .list{margin-top:14px;display:flex;flex-direction:column;gap:10px}
-    .item{display:flex;gap:10px;align-items:center;padding:12px 12px;border:1px solid var(--border);border-radius:14px;background:#fff}
+    .item{display:flex;gap:10px;align-items:center;padding:12px;border:1px solid var(--border);border-radius:14px;background:#fff}
     .item .txt{flex:1}
     .item .time{font-size:12px;color:var(--muted);margin-top:4px}
     .empty{padding:24px;text-align:center;color:var(--muted)}
     .footer-note{margin-top:10px;font-size:12px;color:var(--muted)}
-    .small{font-size:12px;color:var(--muted)}
+    .small{font-size:12px;color:var(--muted);margin-top:10px}
     .right{margin-left:auto}
     .checkbox{width:18px;height:18px}
     .strike{text-decoration:line-through;color:#9ca3af}
@@ -87,31 +87,17 @@
       </div>
     </div>
 
-    <div class="small" style="margin-top:10px;">
-      저장 위치: (온라인) Firestore /artifacts/schedule-kim-app/users/&lt;uid&gt;/tasks  또는 (오프라인) 브라우저 LocalStorage
+    <div class="small">
+      저장 위치: (온라인) Firestore /artifacts/schedule-kim-app/users/&lt;uid&gt;/tasks 또는 (오프라인) 브라우저 LocalStorage
     </div>
   </div>
 
-  <!-- Firebase (modular) via CDN -->
-  <script type="module">
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
-    import {
-      getAuth,
-      signInAnonymously,
-      onAuthStateChanged
-    } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
+  <!-- ✅ Firebase compat (module 없이 안정적으로 동작) -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore-compat.js"></script>
 
-    import {
-      getFirestore,
-      collection,
-      addDoc,
-      deleteDoc,
-      doc,
-      updateDoc,
-      onSnapshot,
-      serverTimestamp
-    } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
-
+  <script>
     // --- Firebase config (교수님 값) ---
     const firebaseConfig = {
       apiKey: "AIzaSyBSwGAhynYlK68A18WEqWSG1XZaY_q3VHw",
@@ -123,17 +109,8 @@
       appId: "1:623069272138:web:5caa87bf0723083149aeb3"
     };
 
-    // --- App state ---
-    const app = initializeApp(firebaseConfig);
-    const auth = getAuth(app);
-    const db = getFirestore(app);
-
-    // GitHub Pages에서도 고정되는 appId (문서 경로에 들어감)
+    // 고정 appId (Firestore 경로에 사용)
     const appId = "schedule-kim-app";
-
-    let user = null;
-    let unsubscribeSnap = null;
-    let isOffline = false;
 
     // --- DOM ---
     const banner = document.getElementById("banner");
@@ -146,3 +123,287 @@
 
     const ampmSel = document.getElementById("ampmSel");
     const hourSel = document.getElementById("hourSel");
+    const minSel = document.getElementById("minSel");
+    const taskInput = document.getElementById("taskInput");
+    const addBtn = document.getElementById("addBtn");
+
+    const listEl = document.getElementById("list");
+    const emptyEl = document.getElementById("empty");
+
+    // --- Select options ---
+    for (let h = 1; h <= 12; h++) {
+      const opt = document.createElement("option");
+      opt.value = String(h);
+      opt.textContent = String(h);
+      hourSel.appendChild(opt);
+    }
+    for (let m = 0; m < 60; m += 5) {
+      const mm = String(m).padStart(2, "0");
+      const opt = document.createElement("option");
+      opt.value = mm;
+      opt.textContent = mm;
+      minSel.appendChild(opt);
+    }
+    hourSel.value = "9";
+    minSel.value = "00";
+
+    // ✅ 날짜 기본값(오늘) 강제 세팅
+    const today = new Date();
+    const yyyy = today.getFullYear();
+    const mm = String(today.getMonth() + 1).padStart(2, "0");
+    const dd = String(today.getDate()).padStart(2, "0");
+    dateInput.value = `${yyyy}-${mm}-${dd}`;
+
+    // --- LocalStorage ---
+    const LS_KEY = "offline_tasks_v1";
+    function loadLocal() {
+      try { return JSON.parse(localStorage.getItem(LS_KEY) || "[]"); }
+      catch { return []; }
+    }
+    function saveLocal(tasks) {
+      localStorage.setItem(LS_KEY, JSON.stringify(tasks));
+    }
+
+    // --- UI helpers ---
+    function showBanner(on, title, desc, showRetry) {
+      if (!on) {
+        banner.style.display = "none";
+        retryBtn.style.display = "none";
+        return;
+      }
+      banner.style.display = "block";
+      bannerTitle.textContent = title || "온라인 동기화가 막혀 있습니다 (로컬로 표시 중)";
+      bannerDesc.textContent = desc || "";
+      retryBtn.style.display = showRetry ? "inline-flex" : "none";
+    }
+
+    function timeTo24(ampm, hStr, mStr) {
+      let h = parseInt(hStr, 10);
+      if (ampm === "오후" && h !== 12) h += 12;
+      if (ampm === "오전" && h === 12) h = 0;
+      return String(h).padStart(2,"0") + ":" + mStr;
+    }
+    function timeTo12(t24) {
+      const parts = (t24 || "00:00").split(":");
+      const hh = parseInt(parts[0] || "0", 10);
+      const mm = parseInt(parts[1] || "0", 10);
+      const p = hh >= 12 ? "오후" : "오전";
+      const h12 = (hh % 12) || 12;
+      return `${p} ${h12}:${String(mm).padStart(2,"0")}`;
+    }
+
+    // --- State ---
+    let auth = null, db = null, user = null;
+    let unsubscribeSnap = null;
+    let isOffline = false;
+    let allTasks = [];
+
+    function render() {
+      const date = dateInput.value;
+      const tasks = allTasks
+        .filter(t => t.date === date)
+        .sort((a,b) => (a.time||"").localeCompare(b.time||""));
+
+      listEl.innerHTML = "";
+      if (tasks.length === 0) {
+        emptyEl.style.display = "block";
+        return;
+      }
+      emptyEl.style.display = "none";
+
+      for (const t of tasks) {
+        const row = document.createElement("div");
+        row.className = "item";
+
+        const cb = document.createElement("input");
+        cb.type = "checkbox";
+        cb.className = "checkbox";
+        cb.checked = !!t.completed;
+        cb.addEventListener("change", () => toggleTask(t.id, !t.completed));
+
+        const txtBox = document.createElement("div");
+        txtBox.className = "txt";
+        const title = document.createElement("div");
+        title.textContent = t.text || "";
+        if (t.completed) title.classList.add("strike");
+
+        const time = document.createElement("div");
+        time.className = "time";
+        time.textContent = timeTo12(t.time);
+
+        txtBox.appendChild(title);
+        txtBox.appendChild(time);
+
+        const del = document.createElement("button");
+        del.className = "btn-danger";
+        del.textContent = "삭제";
+        del.addEventListener("click", () => deleteTask(t.id));
+
+        row.appendChild(cb);
+        row.appendChild(txtBox);
+        row.appendChild(del);
+        listEl.appendChild(row);
+      }
+    }
+
+    function goOffline(reason) {
+      isOffline = true;
+      allTasks = loadLocal();
+      render();
+      showBanner(true,
+        "온라인 동기화가 막혀 있습니다 (로컬로 표시 중)",
+        reason || "네트워크 또는 Firebase 설정 문제로 로컬 모드로 전환되었습니다.",
+        true
+      );
+    }
+
+    function tasksColRef() {
+      // /artifacts/schedule-kim-app/users/<uid>/tasks
+      return db.collection("artifacts").doc(appId).collection("users").doc(user.uid).collection("tasks");
+    }
+
+    function subscribeFirestore() {
+      if (!user) return;
+
+      if (unsubscribeSnap) { unsubscribeSnap(); unsubscribeSnap = null; }
+
+      unsubscribeSnap = tasksColRef().onSnapshot(
+        (snap) => {
+          allTasks = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+          render();
+          showBanner(false);
+        },
+        (err) => {
+          console.warn("Firestore error:", err);
+          const code = err.code || "";
+          const msg = err.message || "";
+          goOffline(
+            `Firestore 구독 실패\ncode: ${code}\nmessage: ${msg}\n\n체크:\n1) Firestore Rules가 user.uid 읽기/쓰기 허용\n2) Authentication → Settings → Authorized domains에 dhkim3s-creator.github.io 추가\n3) Authentication → Sign-in method에서 Anonymous 사용 설정`
+          );
+        }
+      );
+    }
+
+    async function connectOnline() {
+      try {
+        showBanner(false);
+        isOffline = false;
+
+        firebase.initializeApp(firebaseConfig);
+        auth = firebase.auth();
+        db = firebase.firestore();
+
+        // 익명 로그인
+        await auth.signInAnonymously();
+
+      } catch (err) {
+        console.warn("Auth error:", err);
+        const code = err.code || "";
+        const msg = err.message || "";
+        goOffline(
+          `Firebase 인증 실패\ncode: ${code}\nmessage: ${msg}\n\n체크:\n1) Firebase 콘솔 → Authentication → Sign-in method → Anonymous 사용 설정\n2) Authentication → Settings → Authorized domains에 dhkim3s-creator.github.io 추가`
+        );
+      }
+    }
+
+    // --- Events ---
+    taskInput.addEventListener("input", () => {
+      addBtn.disabled = !taskInput.value.trim();
+    });
+
+    dateInput.addEventListener("change", () => render());
+
+    retryBtn.addEventListener("click", async () => {
+      showBanner(true, "재연결 시도 중...", "Firebase에 다시 연결을 시도합니다.", false);
+      await connectOnline();
+      // 연결되면 onAuthStateChanged가 트리거됨
+    });
+
+    addBtn.addEventListener("click", async () => {
+      const text = taskInput.value.trim();
+      if (!text) return;
+
+      const payload = {
+        text,
+        date: dateInput.value,
+        time: timeTo24(ampmSel.value, hourSel.value, minSel.value),
+        completed: false,
+        createdAt: new Date().toISOString()
+      };
+
+      // offline
+      if (isOffline || !user) {
+        const local = loadLocal();
+        local.push({ id: crypto.randomUUID(), ...payload });
+        saveLocal(local);
+        allTasks = local;
+        render();
+        taskInput.value = "";
+        addBtn.disabled = true;
+        return;
+      }
+
+      // online
+      try {
+        await tasksColRef().add({
+          ...payload,
+          uid: user.uid,
+          createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        taskInput.value = "";
+        addBtn.disabled = true;
+      } catch (err) {
+        console.warn("add failed:", err);
+        goOffline(`온라인 저장 실패\ncode: ${err.code || ""}\nmessage: ${err.message || ""}`);
+      }
+    });
+
+    async function toggleTask(id, newVal) {
+      if (isOffline || !user) {
+        const local = loadLocal().map(t => t.id === id ? { ...t, completed: newVal } : t);
+        saveLocal(local);
+        allTasks = local;
+        render();
+        return;
+      }
+      try {
+        await tasksColRef().doc(id).update({ completed: newVal });
+      } catch (err) {
+        console.warn("toggle failed:", err);
+        goOffline(`완료 체크 동기화 실패\ncode: ${err.code || ""}\nmessage: ${err.message || ""}`);
+      }
+    }
+
+    async function deleteTask(id) {
+      if (isOffline || !user) {
+        const local = loadLocal().filter(t => t.id !== id);
+        saveLocal(local);
+        allTasks = local;
+        render();
+        return;
+      }
+      try {
+        await tasksColRef().doc(id).delete();
+      } catch (err) {
+        console.warn("delete failed:", err);
+        goOffline(`삭제 동기화 실패\ncode: ${err.code || ""}\nmessage: ${err.message || ""}`);
+      }
+    }
+
+    // --- Start ---
+    connectOnline().then(() => {
+      if (!auth) return;
+
+      auth.onAuthStateChanged((u) => {
+        user = u;
+        if (user) {
+          accountPill.textContent = "계정: " + (user.uid || "-").slice(0, 8) + "...";
+          subscribeFirestore();
+        } else {
+          accountPill.textContent = "계정: -";
+        }
+      });
+    });
+  </script>
+</body>
+</html>
